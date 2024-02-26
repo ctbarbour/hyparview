@@ -59,7 +59,7 @@ impl Message for JoinMessage {
         Ok(())
     }
 
-    fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+    fn decode(&mut self, _buffer: &mut BytesMut) -> Result<(), std::io::Error> {
         Ok(())
     }
 }
