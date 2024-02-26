@@ -11,36 +11,78 @@ pub trait Message: std::fmt::Debug {
     fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error>;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct JoinMessage {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ShuffleMessage {
     pub origin: SocketAddr,
     pub nodes: HashSet<SocketAddr>,
     pub ttl: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ForwardJoinMessage {
-    peer: SocketAddr,
-    ttl: u32,
+    pub peer: SocketAddr,
+    pub ttl: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ShuffleReplyMessage {
-    nodes: HashSet<SocketAddr>,
+    pub nodes: HashSet<SocketAddr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct NeighborMessage {
-    high_priority: bool,
+    pub high_priority: bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DisconnectMessage {
-    alive: bool,
-    respond: bool,
+    pub alive: bool,
+    pub respond: bool,
+}
+
+impl Message for DisconnectMessage {
+    fn encode(&self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        buffer.put_u8(5);
+        buffer.put_u8(self.alive.into());
+        buffer.put_u8(self.respond.into());
+
+        Ok(())
+    }
+
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        self.alive = match buffer.get_u8() {
+            0 => false,
+            _ => true,
+        };
+
+        self.respond = match buffer.get_u8() {
+            0 => false,
+            _ => true,
+        };
+
+        Ok(())
+    }
+}
+
+impl Message for NeighborMessage {
+    fn encode(&self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        buffer.put_u8(6);
+        buffer.put_u8(self.high_priority.into());
+
+        Ok(())
+    }
+
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        self.high_priority = match buffer.get_u8() {
+            0 => false,
+            _ => true,
+        };
+
+        Ok(())
+    }
 }
 
 impl Default for ShuffleMessage {
@@ -125,6 +167,77 @@ impl Message for ShuffleMessage {
             buffer.advance(buffer.iter().position(|b| *b == 0).unwrap() + 1);
         }
         self.ttl = buffer.get_u32();
+        Ok(())
+    }
+}
+
+impl Message for ForwardJoinMessage {
+    fn encode(&self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        buffer.put_u8(3);
+        buffer.extend_from_slice(&self.peer.to_string().as_bytes());
+        buffer.put_u8(0);
+        buffer.put_u32(self.ttl);
+        Ok(())
+    }
+
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        let peer_str =
+            String::from_utf8_lossy(&buffer[..buffer.iter().position(|b| *b == 0).unwrap()]);
+        self.peer = match peer_str.parse::<SocketAddr>() {
+            Ok(addr) => addr,
+            Err(_) => {
+                return Err(Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid origin address",
+                ))
+            }
+        };
+
+        self.ttl = buffer.get_u32();
+        Ok(())
+    }
+}
+
+impl Message for ShuffleReplyMessage {
+    fn encode(&self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        buffer.put_u8(4);
+        buffer.extend_from_slice(&(self.nodes.len() as u32).to_be_bytes());
+        for node in &self.nodes {
+            buffer.extend_from_slice(&node.to_string().as_bytes());
+            buffer.put_u8(0);
+        }
+
+        Ok(())
+    }
+
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error> {
+        self.nodes.clear();
+        let node_count = buffer.get_u32();
+        if buffer.len()
+            < (node_count as usize * (mem::size_of::<SocketAddr>() + 1))
+                .try_into()
+                .unwrap()
+        {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Insufficient data for nodes",
+            ));
+        }
+        for _ in 0..node_count {
+            let node_str =
+                String::from_utf8_lossy(&buffer[..buffer.iter().position(|b| *b == 0).unwrap()]);
+            self.nodes.insert(match node_str.parse::<SocketAddr>() {
+                Ok(addr) => addr,
+                Err(_) => {
+                    return Err(Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Invalid node address",
+                    ))
+                }
+            });
+            buffer.advance(buffer.iter().position(|b| *b == 0).unwrap() + 1);
+        }
+
         Ok(())
     }
 }

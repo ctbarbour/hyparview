@@ -1,5 +1,5 @@
-use hyparview::client::Client;
 use clap::{Parser, Subcommand};
+use hyparview::client::Client;
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -10,15 +10,24 @@ struct Cli {
     host: String,
 
     #[clap(long, default_value_t = 8080)]
-    port: u16
+    port: u16,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Join
+    Join,
 }
 
-#[tokio::main]
+/// Entry point for CLI tool.
+///
+/// The `[tokio::main]` annotation signals that the Tokio runtime should be
+/// started when the function is called. The body of the function is executed
+/// within the newly spawned runtime.
+///
+/// `flavor = "current_thread"` is used here to avoid spawning background
+/// threads. The CLI tool use case benefits more by being lighter instead of
+/// multi-threaded.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 

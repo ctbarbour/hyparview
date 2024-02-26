@@ -20,3 +20,4 @@ futures = { version = "0.3.0", features = ["thread-pool"]}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.10", features = ["full"] }
+rand = "0.8.4"

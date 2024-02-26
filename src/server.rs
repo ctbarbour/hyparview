@@ -1,5 +1,4 @@
 use crate::codec::HyParViewCodec;
-use crate::messages::Message;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -110,21 +109,13 @@ impl Handler {
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         while let Some(message) = self.connection.next().await {
             match message {
-                Ok(message) => {
-                    self.handle_message(message).await?;
-                }
+                Ok(message) => println!("Received message {:?}", message),
                 Err(e) => return Err(e.into()),
             }
         }
 
-        Ok(())
-    }
+        // Client disconnected
 
-    async fn handle_message(
-        &mut self,
-        message: Box<dyn Message + Send>,
-    ) -> Result<(), Box<dyn Error>> {
-        println!("Received message {:?}", message);
         Ok(())
     }
 }
