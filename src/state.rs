@@ -2,6 +2,7 @@ use crate::codec::HyParViewCodec;
 use crate::messages::*;
 use futures::SinkExt;
 use rand::{thread_rng, Rng};
+use rand::seq::IteratorRandom;
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -39,10 +40,10 @@ impl Default for Config {
 }
 
 #[derive(Debug)]
-struct ActivePeer {
-    connection: Framed<TcpStream, HyParViewCodec>,
+pub struct ActivePeer {
+    pub connection: Framed<TcpStream, HyParViewCodec>,
 
-    rx: mpsc::UnboundedReceiver<Box<dyn Message + Send>>,
+    pub rx: mpsc::UnboundedReceiver<Box<dyn Message + Send>>,
 }
 
 #[derive(Debug)]
@@ -65,95 +66,81 @@ impl PeerState {
 impl PeerState {
     pub async fn on_join(
         &mut self,
-        peer_addr: SocketAddr,
+        sender: SocketAddr,
         stream: TcpStream,
-    ) -> Result<Option<ActivePeer>, std::io::Error> {
-        let active_peer = self.add_peer_to_active_view(peer_addr, stream);
+    ) -> Result<(), std::io::Error> {
+        self.add_peer_to_active_view(sender, stream);
 
         let forward_join_message = Box::new(ForwardJoinMessage {
-            peer: peer_addr,
+            peer: sender,
             ttl: self.config.active_random_walk_length,
         });
 
         for (peer, tx) in self.active_view.iter() {
-            if *peer != peer_addr {
+            if *peer != sender {
                 let _ = tx.send(forward_join_message.clone());
             }
         }
 
-        Ok(active_peer)
+        Ok(())
     }
 
     pub async fn on_forward_join(
         &mut self,
-        peer_addr: SocketAddr,
+        sender: SocketAddr,
         stream: TcpStream,
-        message: ForwardJoinMessage,
-    ) -> Result<Option<ActivePeer>, std::io::Error> {
-        if message.ttl == 0 || self.active_view.len() == 0 {
-            let active_peer = self.add_peer_to_active_view(peer_addr, stream);
-            return Ok(active_peer);
+        peer: SocketAddr,
+        ttl: u32
+    ) -> Result<(), std::io::Error> {
+        if ttl == 0 || self.active_view.is_empty() {
+            self.add_peer_to_active_view(peer, stream);
+            return Ok(());
         }
 
-        if message.ttl == self.config.passive_random_walk_length {
-            self.add_peer_to_passive_view(peer_addr);
+        if ttl == self.config.passive_random_walk_length {
+            self.add_peer_to_passive_view(peer);
         }
 
         let mut rng = thread_rng();
 
-        let mut resevoir = None;
-        let mut i = 0;
-        for (peer, tx) in self.active_view.iter() {
-            if &peer_addr == peer {
-                continue;
+        match self.active_view.iter().filter_map(|(key, value)| {
+            if *key == peer {
+                Some((key, value))
+            } else {
+                None
             }
-
-            i += 1;
-            let keep_probability = 1.0 / (i as f64);
-            if rng.gen_bool(keep_probability) {
-                resevoir = Some(tx);
+        }).choose(&mut rng) {
+            Some((_, next)) => {
+                let _ = next.send(Box::new(ForwardJoinMessage {
+                    peer: peer,
+                    ttl: ttl - 1,
+                }));
+            }
+            None => {
+                self.add_peer_to_active_view(peer, stream);
             }
         }
 
-        if let Some(next) = resevoir {
-            let _ = next.send(Box::new(ForwardJoinMessage {
-                peer: message.peer,
-                ttl: message.ttl - 1,
-            }));
-        }
-
-        Ok(None)
+        Ok(())
     }
 
-    pub async fn on_shuffle(
+    async fn on_shuffle(
         &mut self,
-        sender: SocketAddr,
-        message: ShuffleMessage,
+        origin: SocketAddr,
+        ttl: u32,
+        nodes: HashSet<SocketAddr>
     ) -> Result<(), std::io::Error> {
-        if message.ttl == 0 {
-            let node_count = message.nodes.len();
-
-            let mut resevoir: Vec<SocketAddr> = Vec::with_capacity(node_count);
-            let mut i = 0;
+        if ttl == 0 {
+            let node_count = nodes.len();
             let mut rng = thread_rng();
-            for item in self.passive_view.iter() {
-                i += 1;
-                if i <= node_count {
-                    resevoir.push(*item);
-                } else {
-                    let keep_probability = (node_count as f64) / (i as f64);
-                    if rng.gen_bool(keep_probability) {
-                        let replace_index = rng.gen_range(0..node_count);
-                        resevoir[replace_index] = *item;
-                    }
-                }
-            }
 
-            let socket = TcpStream::connect(message.origin).await?;
+            let shuffled_nodes = self.passive_view.iter().choose_multiple(&mut rng, node_count);
+
+            let socket = TcpStream::connect(origin).await?;
             let mut transport = Framed::new(socket, HyParViewCodec::new());
             transport
                 .send(Box::new(ShuffleReplyMessage {
-                    nodes: resevoir.into_iter().collect(),
+                    nodes: shuffled_nodes.into_iter().collect(),
                 }))
                 .await?;
         }
