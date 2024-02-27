@@ -9,16 +9,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 pub trait Message: std::fmt::Debug {
     fn encode(&self, buffer: &mut BytesMut) -> Result<(), std::io::Error>;
     fn decode(&mut self, buffer: &mut BytesMut) -> Result<(), std::io::Error>;
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error>;
-}
-
-pub trait Handler {
-    async fn on_join(&mut self, message: &JoinMessage) -> Result<(), std::io::Error>;
-    async fn on_shuffle(&mut self, message: &ShuffleMessage) -> Result<(), std::io::Error>;
-    async fn on_forward_join(&mut self, message: &ForwardJoinMessage) -> Result<(), std::io::Error>;
-    async fn on_shuffle_reply(&mut self, message: &ShuffleReplyMessage) -> Result<(), std::io::Error>;
-    async fn on_neighbor(&mut self, message: &NeighborMessage) -> Result<(), std::io::Error>;
-    async fn on_disconnect(&mut self, message: &DisconnectMessage) -> Result<(), std::io::Error>;
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -75,10 +65,6 @@ impl Message for DisconnectMessage {
 
         Ok(())
     }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_disconnect(self)
-    }
 }
 
 impl Message for NeighborMessage {
@@ -96,10 +82,6 @@ impl Message for NeighborMessage {
         };
 
         Ok(())
-    }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_neighbor(self)
     }
 }
 
@@ -121,10 +103,6 @@ impl Message for JoinMessage {
 
     fn decode(&mut self, _buffer: &mut BytesMut) -> Result<(), std::io::Error> {
         Ok(())
-    }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_join(self)
     }
 }
 
@@ -191,10 +169,6 @@ impl Message for ShuffleMessage {
         self.ttl = buffer.get_u32();
         Ok(())
     }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_shuffle(self).await
-    }
 }
 
 impl Message for ForwardJoinMessage {
@@ -221,10 +195,6 @@ impl Message for ForwardJoinMessage {
 
         self.ttl = buffer.get_u32();
         Ok(())
-    }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_forward_join(self)
     }
 }
 
@@ -269,9 +239,5 @@ impl Message for ShuffleReplyMessage {
         }
 
         Ok(())
-    }
-
-    async fn accept(&self, handler: &mut dyn Handler) -> Result<(), std::io::Error> {
-        handler.on_shuffle_reply(self)
     }
 }

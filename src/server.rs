@@ -15,22 +15,14 @@ use futures::SinkExt;
 struct Listener {
     listener: TcpListener,
     limit_connections: Arc<Semaphore>,
+    state_holder: PeerStateDropGuard,
 }
 
 #[derive(Debug)]
-pub struct MessageHandler {
+pub struct Handler {
     state: Arc<Mutex<PeerState>>,
     sender: SocketAddr,
     stream: TcpStream,
-}
-
-impl Handler for MessageHandler {
-    async fn on_join(&mut self, _message: &JoinMessage) -> Result<(), std::io::Error> {
-        let mut state = self.state.lock().await;
-        state.on_join(self.sender, self.stream.clone()).await;
-
-        Ok(())
-    }
 }
 
 const MAX_CONNECTIONS: usize = 1024;

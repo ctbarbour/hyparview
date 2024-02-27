@@ -1,5 +1,6 @@
 use crate::codec::HyParViewCodec;
-use crate::messages::*;
+use crate::command::Command;
+use crate::messages:*;
 use futures::SinkExt;
 use rand::{thread_rng, Rng};
 use rand::seq::IteratorRandom;
@@ -21,6 +22,51 @@ pub struct Config {
     shuffle_active_view_count: usize,
     shuffle_passive_view_count: usize,
     shuffle_interval: u32,
+}
+
+#[derive(Debug)]
+pub(crate) struct PeerStateDropGuard {
+    state: PeerState,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PeerState {
+    shared: Arc<Mutex<State>>,
+}
+
+#[derive(Debug)]
+struct State {
+    active_view: HashMap<SocketAddr, mpsc::UnboundedSender<Command>>,
+    passive_view: HashSet<SocketAddr>,
+    config: Config,
+}
+
+impl PeerStateDropGuard {
+    pub(crate) fn new() -> PeerStateDropGuard {
+        PeerStateDropGuard { state: PeerState::new() }
+    }
+
+    pub(crate) fn state(&self) -> PeerState {
+        self.state.clone()
+    }
+}
+
+impl PeerState {
+    pub(crate) fn new(config: Config) -> PeerState {
+        PeerState {
+            shared: Arc::new(Mutex::new(State {
+                    active_view: HashMap::new(),
+                    passive_view:: HashSet::new(),
+                    config: config
+                })
+            })
+        }
+    }
+
+    pub(crate) async fn on_join(&self) -> Result<(), std::io::Error> {
+        let mut state = self.shared.state.lock().unwrap();
+
+    }
 }
 
 impl Default for Config {
@@ -46,24 +92,7 @@ pub struct ActivePeer {
     pub rx: mpsc::UnboundedReceiver<Box<dyn Message + Send>>,
 }
 
-#[derive(Debug)]
-pub struct PeerState {
-    active_view: HashMap<SocketAddr, mpsc::UnboundedSender<Box<dyn Message + Send>>>,
-    passive_view: HashSet<SocketAddr>,
-    config: Config,
-}
-
-impl PeerState {
-    pub fn new(config: Config) -> Self {
-        PeerState {
-            config: config,
-            active_view: HashMap::new(),
-            passive_view: HashSet::new(),
-        }
-    }
-}
-
-impl PeerState {
+impl State {
     pub async fn on_join(
         &mut self,
         sender: SocketAddr,
@@ -124,7 +153,7 @@ impl PeerState {
         Ok(())
     }
 
-    async fn on_shuffle(
+    pub async fn on_shuffle(
         &mut self,
         origin: SocketAddr,
         ttl: u32,
