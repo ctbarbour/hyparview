@@ -1,11 +1,11 @@
 use crate::codec::HyParViewCodec;
-use crate::state::*;
-use crate::messages::*;
+use crate::{State, Connection};
+use crate::message::*;
 use std::error::Error;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -20,9 +20,53 @@ struct Listener {
 
 #[derive(Debug)]
 pub struct Handler {
-    state: Arc<Mutex<PeerState>>,
-    sender: SocketAddr,
-    stream: TcpStream,
+    state: PeerState,
+    connection: Connection
+}
+
+#[derive(Debug)]
+pub(crate) struct PeerStateDropGuard {
+    state: PeerState,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PeerState {
+    shared: Arc<Mutex<Shared>>,
+}
+
+#[derive(Debug)]
+struct Shared {
+    state: Mutex<State>
+}
+
+impl PeerStateDropGuard {
+    pub(crate) fn new() -> PeerStateDropGuard {
+        PeerStateDropGuard { state: PeerState::new() }
+    }
+
+    pub(crate) fn state(&self) -> PeerState {
+        self.state.clone()
+    }
+}
+
+impl PeerState {
+    pub(crate) fn new(config: Config) -> PeerState {
+        PeerState {
+            shared: Arc::new(Shared {
+                state: Mutex::new(State {
+                    active_view: HashMap::new(),
+                    passive_view: HashSet::new(),
+                    config: config
+                })
+            })
+        }
+    }
+
+    pub(crate) async fn on_join(&self, message: JoinMessage) -> Result<(), std::io::Error> {
+        let mut state = self.shared.state.lock().await;
+        state.on_join(command, connection).await;
+        Ok(())
+    }
 }
 
 const MAX_CONNECTIONS: usize = 1024;
@@ -31,9 +75,9 @@ pub async fn run(listener: TcpListener) {
     let mut server = Listener {
         listener: listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+        state_holder: PeerStateDropGuard::new()
     };
 
-    let state = Arc::new(Mutex::new(PeerState::new(Config::default())));
 
     tokio::select! {
         res = server.run(state) => {
@@ -67,13 +111,16 @@ impl Listener {
             // error here is non-recoverable.
             let (stream, addr) = self.accept().await?;
 
-            let state = Arc::clone(&state);
+            let mut Handler {
+                state: self.state_holder.state(),
+                connection: Connection::new(stream, addr),
+            };
 
             // Spawn a new task to process the connections. Tokio tasks are like
             // asynchronous green threads and are executed concurrently.
             tokio::spawn(async move {
                 // Process the connection. If an error is encountered, log it.
-                if let Err(err) = Self::process(state, stream, addr).await {
+                if let Err(err) = handler.run().await {
                     eprintln!("connection error; err = {:?}", err);
                 }
                 // Move the permit into the task and drop it after completion.
@@ -108,48 +155,25 @@ impl Listener {
             backoff *= 2;
         }
     }
+}
 
-    async fn process(
-        state: Arc<Mutex<PeerState>>,
-        stream: TcpStream,
-        addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
-        let mut transport = Framed::new(stream, HyParViewCodec::new());
-        match transport.next().await {
-            Some(Ok(msg)) => {
-                let mut state = state.lock().await;
-                state.handle_message(addr, stream, msg).await;
-            }
-            Some(Err(e)) => {
-                eprintln!("An error occurred while processing messages for {}; error = {:?}", addr, e);
-            }
-            _ => ()
-        };
-
-        let maybe_active_peer = state.lock().await.get_active_peer(addr);
-
-        if let Some(mut active_peer) = maybe_active_peer {
-            loop {
-                tokio::select! {
-                    Some(msg) = active_peer.rx.recv() => {
-                        active_peer.connection.send(msg).await?;
+impl Handler {
+    async fn run() -> Result<(), Box<dyn Error>> {
+        loop {
+            tokio::select! {
+                result = self.connection.next() => match result {
+                    Some(Ok(msg)) => {
+                        msg.apply(&self.state, &mut self.connection).await?
                     }
-
-                    result = transport.next() => match result {
-                        Some(Ok(msg)) => {
-                            let mut state = state.lock().await;
-                            let _ = state.handle_message(addr, stream, msg).await;
-                        }
-                        Some(Err(e)) => {
-                            eprintln!("An error occurred while processing messages for {}; error = {:?}", addr, e);
-                        }
-                        None => break,
+                    Some(Err(e)) => {
+                        eprintln!("An error occurred while processing messages for {}; error = {:?}", addr, e);
+                        return Ok(());
                     }
+                    None => return Ok(());
                 }
             }
-        };
+        }
 
-        transport.send(Box::new(DisconnectMessage { alive: true, respond: false })).await;
         Ok(())
     }
 }

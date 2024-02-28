@@ -1,15 +1,9 @@
-use crate::codec::HyParViewCodec;
-use crate::command::Command;
-use crate::messages:*;
-use futures::SinkExt;
+use crate::Action;
+use crate::message::*;
 use rand::{thread_rng, Rng};
 use rand::seq::IteratorRandom;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::default::Default;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio_util::codec::Framed;
 
 #[derive(Debug)]
 pub struct Config {
@@ -25,48 +19,10 @@ pub struct Config {
 }
 
 #[derive(Debug)]
-pub(crate) struct PeerStateDropGuard {
-    state: PeerState,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PeerState {
-    shared: Arc<Mutex<State>>,
-}
-
-#[derive(Debug)]
 struct State {
-    active_view: HashMap<SocketAddr, mpsc::UnboundedSender<Command>>,
+    active_view: HashSet<SocketAddr>,
     passive_view: HashSet<SocketAddr>,
     config: Config,
-}
-
-impl PeerStateDropGuard {
-    pub(crate) fn new() -> PeerStateDropGuard {
-        PeerStateDropGuard { state: PeerState::new() }
-    }
-
-    pub(crate) fn state(&self) -> PeerState {
-        self.state.clone()
-    }
-}
-
-impl PeerState {
-    pub(crate) fn new(config: Config) -> PeerState {
-        PeerState {
-            shared: Arc::new(Mutex::new(State {
-                    active_view: HashMap::new(),
-                    passive_view:: HashSet::new(),
-                    config: config
-                })
-            })
-        }
-    }
-
-    pub(crate) async fn on_join(&self) -> Result<(), std::io::Error> {
-        let mut state = self.shared.state.lock().unwrap();
-
-    }
 }
 
 impl Default for Config {
@@ -85,181 +41,120 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug)]
-pub struct ActivePeer {
-    pub connection: Framed<TcpStream, HyParViewCodec>,
-
-    pub rx: mpsc::UnboundedReceiver<Box<dyn Message + Send>>,
-}
-
 impl State {
-    pub async fn on_join(
+    pub fn on_join(
         &mut self,
-        sender: SocketAddr,
-        stream: TcpStream,
-    ) -> Result<(), std::io::Error> {
-        self.add_peer_to_active_view(sender, stream);
+        message: JoinMessage,
+        actions: &mut VecDeque<Action>,
+    ) {
+        self.add_peer_to_active_view(message.sender);
 
-        let forward_join_message = Box::new(ForwardJoinMessage {
-            peer: sender,
-            ttl: self.config.active_random_walk_length,
-        });
+        let forward_join = ProtocolMessage::forward_join(self.config.local_peer, message.sender, self.config.active_random_walk_length);
 
-        for (peer, tx) in self.active_view.iter() {
-            if *peer != sender {
-                let _ = tx.send(forward_join_message.clone());
+        for peer in self.active_view.iter() {
+            if *peer != message.sender {
+                actions.push_back(Action::send(*peer, forward_join_message.clone()));
             }
         }
-
-        Ok(())
     }
 
-    pub async fn on_forward_join(
+    pub fn on_forward_join(
         &mut self,
-        sender: SocketAddr,
-        stream: TcpStream,
-        peer: SocketAddr,
-        ttl: u32
-    ) -> Result<(), std::io::Error> {
+        message: ForwardJoinMessage,
+        actions: &mut VecDeque<Action>,
+    ) {
         if ttl == 0 || self.active_view.is_empty() {
-            self.add_peer_to_active_view(peer, stream);
-            return Ok(());
+            self.add_peer_to_active_view(message.sender);
+            return;
         }
 
         if ttl == self.config.passive_random_walk_length {
-            self.add_peer_to_passive_view(peer);
+            self.add_peer_to_passive_view(message.sender);
         }
 
         let mut rng = thread_rng();
 
-        match self.active_view.iter().filter_map(|(key, value)| {
-            if *key == peer {
-                Some((key, value))
+        match self.active_view.iter().filter(|key| {
+            if *key == message.sender {
+                Some(key)
             } else {
                 None
             }
         }).choose(&mut rng) {
-            Some((_, next)) => {
-                let _ = next.send(Box::new(ForwardJoinMessage {
-                    peer: peer,
-                    ttl: ttl - 1,
-                }));
+            Some(next) => {
+                let forward_join = ProtocolMessage::forward_join(self.config.local_peer, message.sender, message.ttl - 1);
+                actions.push_back(Action::Send(next, forward_join));
             }
             None => {
-                self.add_peer_to_active_view(peer, stream);
+                self.add_peer_to_active_view(message.sender);
             }
         }
-
-        Ok(())
     }
 
-    pub async fn on_shuffle(
+    pub fn on_shuffle(
         &mut self,
-        origin: SocketAddr,
-        ttl: u32,
-        nodes: HashSet<SocketAddr>
-    ) -> Result<(), std::io::Error> {
-        if ttl == 0 {
+        message: ShuffleMessage,
+        actions: &mut VecDeque<Action>,
+    ) {
+        if message.ttl == 0 {
             let node_count = nodes.len();
             let mut rng = thread_rng();
 
             let shuffled_nodes = self.passive_view.iter().choose_multiple(&mut rng, node_count);
 
-            let socket = TcpStream::connect(origin).await?;
-            let mut transport = Framed::new(socket, HyParViewCodec::new());
-            transport
-                .send(Box::new(ShuffleReplyMessage {
-                    nodes: shuffled_nodes.into_iter().collect(),
-                }))
-                .await?;
+            let shuffle_reply = ProtocolMessage::shuffle_reply(self.config.local_peer, shuffled_nodes.into_iter().collect());
+            actions.push_back(Actions::send(message.origin, shuffle_reply));
         }
-
-        Ok(())
     }
 
-    pub async fn on_shuffle_reply(
+    pub fn on_shuffle_reply(
         &mut self,
         message: ShuffleReplyMessage,
-    ) -> Result<(), std::io::Error> {
+        actions: &mut VecDeque<Action>,
+    ) {
         for peer in message.nodes {
             self.add_peer_to_passive_view(peer);
         }
-
-        Ok(())
     }
 
-    pub async fn on_neighbor(
+    pub fn on_neighbor(
         &mut self,
-        sender: SocketAddr,
-        stream: TcpStream,
         message: NeighborMessage,
-    ) -> Result<Option<ActivePeer>, std::io::Error> {
+        actions: &mut VecDeque<Action>,
+    ) -> Result<(), std::io::Error> {
         if message.high_priority || !self.is_active_view_full() {
-            let active_peer = self.add_peer_to_active_view(sender, stream);
-            Ok(active_peer)
-        } else {
-            Ok(None)
+            self.add_peer_to_active_view(message.sender);
         }
     }
 
-    pub async fn on_disconnect(
+    pub fn on_disconnect(
         &mut self,
-        sender: SocketAddr,
         message: DisconnectMessage,
-    ) -> Result<(), std::io::Error> {
-        if self.remove_peer_from_active_view(sender, message.respond) {
+        actions: &mut VecDeque<Action>,
+    ) {
+        if self.active_view.remove(message.sender) {
+            if message.respond {
+                let disconnect_message = ProtocolMessage::disconnect(self.config.local_peer, true, false);
+                actions.push_back(Action::send(message.sender, disconnect_message));
+            }
+
             // if the active view is not full
             if !self.is_active_view_full() {
                 // randomly pick a passive peer
                 let mut rng = thread_rng();
 
-                let mut resevoir: Option<SocketAddr> = None;
-                let mut i = 0;
-                for item in self.passive_view.iter() {
-                    i += 1;
-                    let keep_probability = 1.0 / (i as f64);
-                    if rng.gen_bool(keep_probability) {
-                        resevoir = Some(*item);
-                    }
-                }
-
-                if let Some(peer) = resevoir {
+                if let Some(peer) = self.passive_view.iter().choose(&mut rng) {
                     let high_priority = self.active_view.is_empty();
 
-                    let socket = TcpStream::connect(peer).await?;
-                    let mut transport = Framed::new(socket, HyParViewCodec::new());
-                    transport
-                        .send(Box::new(NeighborMessage {
-                            high_priority: high_priority,
-                        }))
-                        .await?
+                    let neighbor_message = ProtocolMessage::neighbor(self.config.local_peer, high_priority);
+
+                    actions.push_back(Action::send(peer, neighbor_message));
                 }
             }
         }
 
-        if message.alive {
-            self.add_peer_to_passive_view(sender);
-        }
-
-        Ok(())
-    }
-
-    fn remove_peer_from_active_view(&mut self, peer_addr: SocketAddr, respond: bool) -> bool {
-        if let Some(tx) = self.active_view.remove(&peer_addr) {
-            if respond {
-                let _ = tx.send(Box::new(DisconnectMessage {
-                    alive: true,
-                    respond: false,
-                }));
-            }
-
-            self.add_peer_to_passive_view(peer_addr);
-
-            drop(tx); // not sure if we need this.
-
-            true
-        } else {
-            false
+        if alive {
+            self.add_peer_to_passive_view(message.sender);
         }
     }
 
@@ -273,35 +168,21 @@ impl State {
 
         if self.is_passive_view_full() {
             let mut rng = thread_rng();
-
-            let mut resevoir: Option<SocketAddr> = None;
-            let mut i = 0;
-            for item in self.passive_view.iter() {
-                i += 1;
-                let keep_probability = 1.0 / (i as f64);
-                if rng.gen_bool(keep_probability) {
-                    resevoir = Some(*item);
-                }
-            }
-
-            if let Some(item) = resevoir {
-                self.passive_view.remove(&item);
+            if let Some(peer) = self.passive_view.iter().choose(&mut rng) {
+                self.passive_view.remove(&peer);
             }
         }
 
         self.passive_view.insert(peer_addr);
-
-        assert!(self.passive_view.len() <= self.config.passive_view_capacity);
     }
 
-    pub fn add_peer_to_active_view(
+    fn add_peer_to_active_view(
         &mut self,
         peer_addr: SocketAddr,
-        stream: TcpStream,
-    ) -> Option<ActivePeer> {
+    ) {
         // Check if the peer is already in the active view or is the current peer
         if self.active_view.contains_key(&peer_addr) || peer_addr == self.config.local_peer {
-            return None;
+            return;
         }
 
         // If the peer is in the passive view, remove it
@@ -313,29 +194,13 @@ impl State {
         if self.is_active_view_full() {
             let mut rng = thread_rng();
 
-            let mut resevoir = None;
-            let mut i = 0;
-            for (k, _) in self.active_view.iter() {
-                i += 1;
-                let keep_probability = 1.0 / (i as f64);
-                if rng.gen_bool(keep_probability) {
-                    resevoir = Some(*k);
-                }
-            }
-
-            if let Some(key) = resevoir {
-                self.active_view.remove(&key);
+            if let Some(peer) = self.active_view.iter().choose(&mut rng) {
+                self.active_view.remove(&peer);
                 self.passive_view.insert(peer_addr);
             }
         }
 
-        let (tx, rx) = mpsc::unbounded_channel::<Box<dyn Message + Send>>();
-        self.active_view.insert(peer_addr, tx);
-
-        Some(ActivePeer {
-            connection: Framed::new(stream, HyParViewCodec::new()),
-            rx: rx,
-        })
+        self.active_view.insert(peer_addr);
     }
 
     fn is_passive_view_full(&self) -> bool {
