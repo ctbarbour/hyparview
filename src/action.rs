@@ -3,24 +3,25 @@ use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum Action {
-  Send {
-    destination: SocketAddr,
-    message: ProtocolMessage,
-  },
+    Send {
+        destination: SocketAddr,
+        message: ProtocolMessage,
+    },
 
-  Disconnect {
-    peer: SocketAddr,
-  },
+    Disconnect {
+        peer: SocketAddr,
+    },
 }
 
 impl Action {
-    use crate::Action::*;
-
     pub(crate) fn send(destination: SocketAddr, message: ProtocolMessage) -> Self {
-        Send { destination, message, }
+        Action::Send {
+            destination,
+            message,
+        }
     }
 
     pub(crate) fn disconnect(peer: SocketAddr) -> Self {
-        Disconnect { peer }
+        Action::Disconnect { peer }
     }
 }

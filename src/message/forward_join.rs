@@ -1,10 +1,10 @@
-use std::net::SocketAddr;
 use crate::PeerState;
+use std::net::SocketAddr;
 
 pub struct ForwardJoinMessage {
     pub sender: SocketAddr,
     pub peer: SocketAddr,
-    pub ttl: u32
+    pub ttl: u32,
 }
 
 impl ForwardJoinMessage {

@@ -1,4 +1,4 @@
-use crate::{PeerState};
+use crate::PeerState;
 use std::net::SocketAddr;
 
 #[derive(Debug)]

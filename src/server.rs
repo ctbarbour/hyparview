@@ -1,6 +1,7 @@
 use crate::codec::HyParViewCodec;
-use crate::{State, Connection};
 use crate::message::*;
+use crate::{Connection, State};
+use futures::SinkExt;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -9,7 +10,6 @@ use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
-use futures::SinkExt;
 
 #[derive(Debug)]
 struct Listener {
@@ -21,7 +21,7 @@ struct Listener {
 #[derive(Debug)]
 pub struct Handler {
     state: PeerState,
-    connection: Connection
+    connection: Connection,
 }
 
 #[derive(Debug)]
@@ -36,12 +36,14 @@ pub(crate) struct PeerState {
 
 #[derive(Debug)]
 struct Shared {
-    state: Mutex<State>
+    state: Mutex<State>,
 }
 
 impl PeerStateDropGuard {
     pub(crate) fn new() -> PeerStateDropGuard {
-        PeerStateDropGuard { state: PeerState::new() }
+        PeerStateDropGuard {
+            state: PeerState::new(),
+        }
     }
 
     pub(crate) fn state(&self) -> PeerState {
@@ -56,9 +58,9 @@ impl PeerState {
                 state: Mutex::new(State {
                     active_view: HashMap::new(),
                     passive_view: HashSet::new(),
-                    config: config
-                })
-            })
+                    config: config,
+                }),
+            }),
         }
     }
 
@@ -75,9 +77,8 @@ pub async fn run(listener: TcpListener) {
     let mut server = Listener {
         listener: listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
-        state_holder: PeerStateDropGuard::new()
+        state_holder: PeerStateDropGuard::new(),
     };
-
 
     tokio::select! {
         res = server.run(state) => {
@@ -89,7 +90,10 @@ pub async fn run(listener: TcpListener) {
 }
 
 impl Listener {
-    pub async fn run(&mut self, state: Arc<Mutex<PeerState>>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(
+        &mut self,
+        state: Arc<Mutex<PeerState>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             // Wait for a permit to become available
             //
@@ -111,7 +115,7 @@ impl Listener {
             // error here is non-recoverable.
             let (stream, addr) = self.accept().await?;
 
-            let mut Handler {
+            let mut handler = Handler {
                 state: self.state_holder.state(),
                 connection: Connection::new(stream, addr),
             };

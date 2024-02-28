@@ -1,7 +1,7 @@
-use crate::Action;
 use crate::message::*;
-use rand::{thread_rng, Rng};
+use crate::Action;
 use rand::seq::IteratorRandom;
+use rand::{thread_rng, Rng};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::default::Default;
 
@@ -42,14 +42,14 @@ impl Default for Config {
 }
 
 impl State {
-    pub fn on_join(
-        &mut self,
-        message: JoinMessage,
-        actions: &mut VecDeque<Action>,
-    ) {
+    pub fn on_join(&mut self, message: JoinMessage, actions: &mut VecDeque<Action>) {
         self.add_peer_to_active_view(message.sender);
 
-        let forward_join = ProtocolMessage::forward_join(self.config.local_peer, message.sender, self.config.active_random_walk_length);
+        let forward_join = ProtocolMessage::forward_join(
+            self.config.local_peer,
+            message.sender,
+            self.config.active_random_walk_length,
+        );
 
         for peer in self.active_view.iter() {
             if *peer != message.sender {
@@ -58,11 +58,7 @@ impl State {
         }
     }
 
-    pub fn on_forward_join(
-        &mut self,
-        message: ForwardJoinMessage,
-        actions: &mut VecDeque<Action>,
-    ) {
+    pub fn on_forward_join(&mut self, message: ForwardJoinMessage, actions: &mut VecDeque<Action>) {
         if ttl == 0 || self.active_view.is_empty() {
             self.add_peer_to_active_view(message.sender);
             return;
@@ -74,15 +70,24 @@ impl State {
 
         let mut rng = thread_rng();
 
-        match self.active_view.iter().filter(|key| {
-            if *key == message.sender {
-                Some(key)
-            } else {
-                None
-            }
-        }).choose(&mut rng) {
+        match self
+            .active_view
+            .iter()
+            .filter(|key| {
+                if *key == message.sender {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .choose(&mut rng)
+        {
             Some(next) => {
-                let forward_join = ProtocolMessage::forward_join(self.config.local_peer, message.sender, message.ttl - 1);
+                let forward_join = ProtocolMessage::forward_join(
+                    self.config.local_peer,
+                    message.sender,
+                    message.ttl - 1,
+                );
                 actions.push_back(Action::Send(next, forward_join));
             }
             None => {
@@ -91,18 +96,20 @@ impl State {
         }
     }
 
-    pub fn on_shuffle(
-        &mut self,
-        message: ShuffleMessage,
-        actions: &mut VecDeque<Action>,
-    ) {
+    pub fn on_shuffle(&mut self, message: ShuffleMessage, actions: &mut VecDeque<Action>) {
         if message.ttl == 0 {
             let node_count = nodes.len();
             let mut rng = thread_rng();
 
-            let shuffled_nodes = self.passive_view.iter().choose_multiple(&mut rng, node_count);
+            let shuffled_nodes = self
+                .passive_view
+                .iter()
+                .choose_multiple(&mut rng, node_count);
 
-            let shuffle_reply = ProtocolMessage::shuffle_reply(self.config.local_peer, shuffled_nodes.into_iter().collect());
+            let shuffle_reply = ProtocolMessage::shuffle_reply(
+                self.config.local_peer,
+                shuffled_nodes.into_iter().collect(),
+            );
             actions.push_back(Actions::send(message.origin, shuffle_reply));
         }
     }
@@ -127,14 +134,11 @@ impl State {
         }
     }
 
-    pub fn on_disconnect(
-        &mut self,
-        message: DisconnectMessage,
-        actions: &mut VecDeque<Action>,
-    ) {
+    pub fn on_disconnect(&mut self, message: DisconnectMessage, actions: &mut VecDeque<Action>) {
         if self.active_view.remove(message.sender) {
             if message.respond {
-                let disconnect_message = ProtocolMessage::disconnect(self.config.local_peer, true, false);
+                let disconnect_message =
+                    ProtocolMessage::disconnect(self.config.local_peer, true, false);
                 actions.push_back(Action::send(message.sender, disconnect_message));
             }
 
@@ -146,7 +150,8 @@ impl State {
                 if let Some(peer) = self.passive_view.iter().choose(&mut rng) {
                     let high_priority = self.active_view.is_empty();
 
-                    let neighbor_message = ProtocolMessage::neighbor(self.config.local_peer, high_priority);
+                    let neighbor_message =
+                        ProtocolMessage::neighbor(self.config.local_peer, high_priority);
 
                     actions.push_back(Action::send(peer, neighbor_message));
                 }
@@ -176,10 +181,7 @@ impl State {
         self.passive_view.insert(peer_addr);
     }
 
-    fn add_peer_to_active_view(
-        &mut self,
-        peer_addr: SocketAddr,
-    ) {
+    fn add_peer_to_active_view(&mut self, peer_addr: SocketAddr) {
         // Check if the peer is already in the active view or is the current peer
         if self.active_view.contains_key(&peer_addr) || peer_addr == self.config.local_peer {
             return;

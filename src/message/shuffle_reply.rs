@@ -1,10 +1,10 @@
 use crate::PeerState;
-use std::net::SocketAddr;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 
 pub struct ShuffleReplyMessage {
     pub sender: SocketAddr,
-    pub nodes: HashSet<SocketAddr>
+    pub nodes: HashSet<SocketAddr>,
 }
 
 impl ShuffleReplyMessage {

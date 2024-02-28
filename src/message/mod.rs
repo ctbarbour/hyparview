@@ -60,16 +60,21 @@ impl ProtocolMessage {
         ProtocolMessage::ForwardJoinMessage {
             sender: sender,
             peer: peer,
-            ttl: ttl
+            ttl: ttl,
         }
     }
 
-    pub(crate) fn neighbor(sender: SocketAddr, origin: SocketAddr, nodes: HashSet<SocketAddr>, ttl: u32) -> Self {
+    pub(crate) fn neighbor(
+        sender: SocketAddr,
+        origin: SocketAddr,
+        nodes: HashSet<SocketAddr>,
+        ttl: u32,
+    ) -> Self {
         ProtocolMessage::NeighborMessage {
             sender: sender,
             origin: origin,
             nodes: nodes,
-            ttl: ttl
+            ttl: ttl,
         }
     }
 }
