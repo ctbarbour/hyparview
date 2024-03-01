@@ -1,11 +1,11 @@
-use crate::codec::HyParViewCodec;
-use crate::messages::*;
+use crate::message::ProtocolMessage;
 use futures::SinkExt;
+use std::net::{IpAddr, SocketAddr};
 use tokio::net::{TcpStream, ToSocketAddrs};
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 pub struct Client {
-    connection: Framed<TcpStream, HyParViewCodec>,
+    connection: Framed<TcpStream, LengthDelimitedCodec>,
 }
 
 impl Client {
@@ -13,12 +13,11 @@ impl Client {
         let socket = TcpStream::connect(addr).await?;
 
         Ok(Client {
-            connection: Framed::new(socket, HyParViewCodec::new()),
+            connection: Framed::new(socket, LengthDelimitedCodec::new()),
         })
     }
 
     pub async fn join(&mut self) -> Result<(), std::io::Error> {
-        self.connection.send(Box::new(JoinMessage {})).await?;
         Ok(())
     }
 }

@@ -1,12 +1,14 @@
 use crate::PeerState;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-pub struct NeighborMessage {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Neighbor {
     pub sender: SocketAddr,
     pub high_priority: bool,
 }
 
-impl NeighborMessage {
+impl Neighbor {
     pub(crate) async fn apply(self, state: &PeerState) -> Result<(), std::io::Error> {
         state.on_neighbor(self).await;
         Ok(())

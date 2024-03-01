@@ -1,12 +1,10 @@
 pub mod server;
 
-pub mod codec;
-
 pub mod client;
 
 pub mod state;
+use state::Config;
 use state::PeerState;
-use state::PeerStateDropGuard;
 
 pub mod connection;
 pub use connection::Connection;

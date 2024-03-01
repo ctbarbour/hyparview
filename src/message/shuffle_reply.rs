@@ -1,13 +1,15 @@
 use crate::PeerState;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-pub struct ShuffleReplyMessage {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShuffleReply {
     pub sender: SocketAddr,
-    pub nodes: HashSet<SocketAddr>,
+    pub nodes: Vec<SocketAddr>,
 }
 
-impl ShuffleReplyMessage {
+impl ShuffleReply {
     pub(crate) async fn apply(self, state: &PeerState) -> Result<(), std::io::Error> {
         state.on_shuffle_reply(self).await;
         Ok(())

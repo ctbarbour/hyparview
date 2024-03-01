@@ -1,7 +1,7 @@
-use crate::codec::HyParViewCodec;
 use crate::message::*;
-use crate::{Connection, State};
+use crate::{Config, Connection, PeerState};
 use futures::SinkExt;
+use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
 use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
 
 #[derive(Debug)]
 struct Listener {
@@ -29,45 +28,15 @@ pub(crate) struct PeerStateDropGuard {
     state: PeerState,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct PeerState {
-    shared: Arc<Mutex<Shared>>,
-}
-
-#[derive(Debug)]
-struct Shared {
-    state: Mutex<State>,
-}
-
 impl PeerStateDropGuard {
     pub(crate) fn new() -> PeerStateDropGuard {
         PeerStateDropGuard {
-            state: PeerState::new(),
+            state: PeerState::new(Config::default()),
         }
     }
 
     pub(crate) fn state(&self) -> PeerState {
         self.state.clone()
-    }
-}
-
-impl PeerState {
-    pub(crate) fn new(config: Config) -> PeerState {
-        PeerState {
-            shared: Arc::new(Shared {
-                state: Mutex::new(State {
-                    active_view: HashMap::new(),
-                    passive_view: HashSet::new(),
-                    config: config,
-                }),
-            }),
-        }
-    }
-
-    pub(crate) async fn on_join(&self, message: JoinMessage) -> Result<(), std::io::Error> {
-        let mut state = self.shared.state.lock().await;
-        state.on_join(command, connection).await;
-        Ok(())
     }
 }
 
@@ -81,7 +50,7 @@ pub async fn run(listener: TcpListener) {
     };
 
     tokio::select! {
-        res = server.run(state) => {
+        res = server.run() => {
             if let Err(e) = res {
                 eprintln!("failed to accept socket; err = {:?}", e);
             }
@@ -90,10 +59,7 @@ pub async fn run(listener: TcpListener) {
 }
 
 impl Listener {
-    pub async fn run(
-        &mut self,
-        state: Arc<Mutex<PeerState>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             // Wait for a permit to become available
             //
@@ -117,7 +83,7 @@ impl Listener {
 
             let mut handler = Handler {
                 state: self.state_holder.state(),
-                connection: Connection::new(stream, addr),
+                connection: Connection::new(addr, stream),
             };
 
             // Spawn a new task to process the connections. Tokio tasks are like
@@ -162,18 +128,14 @@ impl Listener {
 }
 
 impl Handler {
-    async fn run() -> Result<(), Box<dyn Error>> {
+    async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
             tokio::select! {
-                result = self.connection.next() => match result {
-                    Some(Ok(msg)) => {
-                        msg.apply(&self.state, &mut self.connection).await?
+                result = self.connection.read_frame() => match result {
+                    Ok(Some(msg)) => {
+                        msg.apply(&self.state).await?
                     }
-                    Some(Err(e)) => {
-                        eprintln!("An error occurred while processing messages for {}; error = {:?}", addr, e);
-                        return Ok(());
-                    }
-                    None => return Ok(());
+                    _ => break,
                 }
             }
         }

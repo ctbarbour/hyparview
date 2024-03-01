@@ -1,30 +1,34 @@
 mod join;
-pub use join::JoinMessage;
+pub use join::Join;
 
 mod shuffle;
-pub use shuffle::ShuffleMessage;
+pub use shuffle::Shuffle;
 
 mod shuffle_reply;
-pub use shuffle_reply::ShuffleReplyMessage;
+pub use shuffle_reply::ShuffleReply;
 
 mod forward_join;
-pub use forward_join::ForwardJoinMessage;
+pub use forward_join::ForwardJoin;
 
 mod neighbor;
-pub use neighbor::NeighborMessage;
+pub use neighbor::Neighbor;
 
 mod disconnect;
-pub use disconnect::DisconnectMessage;
+pub use disconnect::Disconnect;
 
 use crate::PeerState;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::net::SocketAddr;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProtocolMessage {
-    Join(JoinMessage),
-    Shuffle(ShuffleMessage),
-    ShuffleReply(ShuffleReplyMessage),
-    ForwardJoin(ForwardJoinMessage),
-    Neighbor(NeighborMessage),
-    Disconnect(DisconnectMessage),
+    Join(Join),
+    Shuffle(Shuffle),
+    ShuffleReply(ShuffleReply),
+    ForwardJoin(ForwardJoin),
+    Neighbor(Neighbor),
+    Disconnect(Disconnect),
 }
 
 impl ProtocolMessage {
@@ -41,7 +45,9 @@ impl ProtocolMessage {
         }
     }
 
-    pub(crate) fn sender() -> SocketAddr {
+    pub(crate) fn sender(&self) -> SocketAddr {
+        use ProtocolMessage::*;
+
         match self {
             Join(message) => message.sender,
             Shuffle(message) => message.sender,
@@ -53,28 +59,33 @@ impl ProtocolMessage {
     }
 
     pub(crate) fn join(sender: SocketAddr) -> Self {
-        ProtocolMessage::JoinMessage { sender: sender }
+        ProtocolMessage::Join(Join { sender: sender })
     }
 
     pub(crate) fn forward_join(sender: SocketAddr, peer: SocketAddr, ttl: u32) -> Self {
-        ProtocolMessage::ForwardJoinMessage {
+        ProtocolMessage::ForwardJoin(ForwardJoin {
             sender: sender,
             peer: peer,
             ttl: ttl,
-        }
+        })
     }
 
-    pub(crate) fn neighbor(
-        sender: SocketAddr,
-        origin: SocketAddr,
-        nodes: HashSet<SocketAddr>,
-        ttl: u32,
-    ) -> Self {
-        ProtocolMessage::NeighborMessage {
+    pub(crate) fn neighbor(sender: SocketAddr, high_priority: bool) -> Self {
+        ProtocolMessage::Neighbor(Neighbor {
             sender: sender,
-            origin: origin,
-            nodes: nodes,
-            ttl: ttl,
-        }
+            high_priority,
+        })
+    }
+
+    pub(crate) fn disconnect(sender: SocketAddr, alive: bool, respond: bool) -> Self {
+        ProtocolMessage::Disconnect(Disconnect {
+            sender,
+            alive,
+            respond,
+        })
+    }
+
+    pub(crate) fn shuffle_reply(sender: SocketAddr, nodes: Vec<SocketAddr>) -> Self {
+        ProtocolMessage::ShuffleReply(ShuffleReply { sender, nodes })
     }
 }
