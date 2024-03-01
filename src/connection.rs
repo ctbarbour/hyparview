@@ -1,9 +1,8 @@
 use crate::ProtocolMessage;
 use bytes::{Buf, BytesMut};
 use serde::Serialize;
-use serde_cbor::ser::{IoWrite, Serializer};
+use serde_cbor::ser::{Serializer};
 use std::io::Cursor;
-use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 

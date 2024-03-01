@@ -2,10 +2,10 @@ use crate::message::*;
 use crate::Action;
 use rand::seq::IteratorRandom;
 use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{thread_rng};
 use std::collections::{HashSet, VecDeque};
 use std::default::Default;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{SocketAddr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -165,7 +165,7 @@ impl State {
         }
     }
 
-    pub fn on_shuffle_reply(&mut self, message: ShuffleReply, actions: &mut VecDeque<Action>) {
+    pub fn on_shuffle_reply(&mut self, message: ShuffleReply, _actions: &mut VecDeque<Action>) {
         for peer in message.nodes {
             self.add_peer_to_passive_view(peer);
         }
@@ -174,7 +174,7 @@ impl State {
     pub fn on_neighbor(
         &mut self,
         message: Neighbor,
-        actions: &mut VecDeque<Action>,
+        _actions: &mut VecDeque<Action>,
     ) -> Result<(), std::io::Error> {
         if message.high_priority || !self.is_active_view_full() {
             self.add_peer_to_active_view(message.sender);

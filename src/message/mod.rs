@@ -18,7 +18,7 @@ pub use disconnect::Disconnect;
 
 use crate::PeerState;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,9 +1,6 @@
 use crate::message::ProtocolMessage;
 use crate::Connection;
-use futures::SinkExt;
-use std::net::{IpAddr, SocketAddr};
 use tokio::net::{TcpStream, ToSocketAddrs};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 pub struct Client {
     connection: Connection,

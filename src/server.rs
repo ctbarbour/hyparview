@@ -1,14 +1,10 @@
-use crate::message::*;
 use crate::{Config, Connection, PeerState};
-use futures::SinkExt;
-use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
-use tokio_stream::StreamExt;
 
 #[derive(Debug)]
 struct Listener {
@@ -79,7 +75,7 @@ impl Listener {
             // Accept a new socket. This will attempt to perform error handling.
             // The `accept` method internally attempts to recover errors, so an
             // error here is non-recoverable.
-            let (stream, addr) = self.accept().await?;
+            let (stream, _addr) = self.accept().await?;
 
             let mut handler = Handler {
                 state: self.state_holder.state(),
