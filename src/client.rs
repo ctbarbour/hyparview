@@ -1,11 +1,12 @@
 use crate::message::ProtocolMessage;
+use crate::Connection;
 use futures::SinkExt;
 use std::net::{IpAddr, SocketAddr};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 pub struct Client {
-    connection: Framed<TcpStream, LengthDelimitedCodec>,
+    connection: Connection,
 }
 
 impl Client {
@@ -13,11 +14,13 @@ impl Client {
         let socket = TcpStream::connect(addr).await?;
 
         Ok(Client {
-            connection: Framed::new(socket, LengthDelimitedCodec::new()),
+            connection: Connection::new(socket),
         })
     }
 
     pub async fn join(&mut self) -> Result<(), std::io::Error> {
+        let join_message = ProtocolMessage::join("127.0.0.1:8080".parse().unwrap());
+        self.connection.write_frame(join_message).await?;
         Ok(())
     }
 }

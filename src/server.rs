@@ -83,7 +83,7 @@ impl Listener {
 
             let mut handler = Handler {
                 state: self.state_holder.state(),
-                connection: Connection::new(addr, stream),
+                connection: Connection::new(stream),
             };
 
             // Spawn a new task to process the connections. Tokio tasks are like
@@ -132,14 +132,11 @@ impl Handler {
         loop {
             tokio::select! {
                 result = self.connection.read_frame() => match result {
-                    Ok(Some(msg)) => {
-                        msg.apply(&self.state).await?
-                    }
-                    _ => break,
+                    Ok(Some(message)) => message.apply(&self.state).await?,
+                    Ok(None) => return Ok(()),
+                    Err(err) => return Err(err)
                 }
             }
         }
-
-        Ok(())
     }
 }
