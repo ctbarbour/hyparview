@@ -1,7 +1,7 @@
 use crate::ProtocolMessage;
 use bytes::{Buf, BytesMut};
 use serde::Serialize;
-use serde_cbor::ser::{Serializer};
+use serde_cbor::ser::Serializer;
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
@@ -20,7 +20,7 @@ impl Connection {
         }
     }
 
-    pub async fn write_frame(&mut self, message: ProtocolMessage) -> std::io::Result<()> {
+    pub async fn write_frame(&mut self, message: &ProtocolMessage) -> std::io::Result<()> {
         let mut buf = Vec::new();
         let mut serializer = Serializer::new(&mut buf);
         let _ = message.serialize(&mut serializer); // handle error here
@@ -48,10 +48,6 @@ impl Connection {
                     // parse the message from the read buffer
                     let start_pos = buf.position() as usize;
                     let end_pos = start_pos + length;
-                    println!(
-                        "Received a frame start={:?},end={:?},length={:?},buf={:?}",
-                        start_pos, end_pos, length, buf
-                    );
                     let frame = serde_cbor::from_slice(&buf.get_ref()[start_pos..end_pos]).unwrap();
 
                     // discard the parsed data from the read buffer

@@ -1,7 +1,5 @@
 pub mod server;
 
-pub mod client;
-
 pub mod state;
 use state::Config;
 use state::PeerState;
@@ -14,3 +12,6 @@ pub use message::ProtocolMessage;
 
 pub mod action;
 pub use action::Action;
+
+pub mod client;
+pub use client::Client;

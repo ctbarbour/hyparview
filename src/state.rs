@@ -1,11 +1,12 @@
 use crate::message::*;
 use crate::Action;
+use crate::Client;
 use rand::seq::IteratorRandom;
 use rand::seq::SliceRandom;
-use rand::{thread_rng};
+use rand::thread_rng;
 use std::collections::{HashSet, VecDeque};
 use std::default::Default;
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -68,10 +69,16 @@ impl PeerState {
         }
     }
 
+    pub(crate) async fn is_active_peer(&self, peer: SocketAddr) -> Result<bool, std::io::Error> {
+        let state = self.shared.state.lock().await;
+        Ok(state.is_active_peer(peer))
+    }
+
     pub(crate) async fn on_join(&self, message: Join) -> Result<(), std::io::Error> {
         let mut state = self.shared.state.lock().await;
         let mut actions = VecDeque::new();
         state.on_join(message, &mut actions);
+        self.handle_actions(&mut actions).await?;
         Ok(())
     }
 
@@ -112,9 +119,30 @@ impl PeerState {
         state.on_disconnect(message, &mut actions);
         Ok(())
     }
+
+    async fn handle_actions(&self, actions: &mut VecDeque<Action>) -> Result<(), std::io::Error> {
+        for action in actions.iter() {
+            match action {
+                Action::Send {
+                    destination,
+                    message,
+                } => {
+                    let mut client = Client::connect(destination).await?;
+                    client.send(&message).await?;
+                }
+                Action::Disconnect { .. } => (),
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl State {
+    pub fn is_active_peer(&self, peer: SocketAddr) -> bool {
+        self.active_view.contains(&peer)
+    }
+
     pub fn on_join(&mut self, message: Join, actions: &mut VecDeque<Action>) {
         self.add_peer_to_active_view(message.sender);
 

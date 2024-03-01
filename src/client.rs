@@ -17,7 +17,10 @@ impl Client {
 
     pub async fn join(&mut self) -> Result<(), std::io::Error> {
         let join_message = ProtocolMessage::join("127.0.0.1:8080".parse().unwrap());
-        self.connection.write_frame(join_message).await?;
-        Ok(())
+        self.send(&join_message).await
+    }
+
+    pub async fn send(&mut self, message: &ProtocolMessage) -> Result<(), std::io::Error> {
+        self.connection.write_frame(message).await
     }
 }

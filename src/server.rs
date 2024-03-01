@@ -1,7 +1,7 @@
 use crate::{Config, Connection, PeerState};
 use std::error::Error;
 use std::net::SocketAddr;
-use std::sync::{Arc};
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
@@ -17,6 +17,7 @@ struct Listener {
 pub struct Handler {
     state: PeerState,
     connection: Connection,
+    peer: SocketAddr,
 }
 
 #[derive(Debug)]
@@ -75,11 +76,12 @@ impl Listener {
             // Accept a new socket. This will attempt to perform error handling.
             // The `accept` method internally attempts to recover errors, so an
             // error here is non-recoverable.
-            let (stream, _addr) = self.accept().await?;
+            let (stream, addr) = self.accept().await?;
 
             let mut handler = Handler {
                 state: self.state_holder.state(),
                 connection: Connection::new(stream),
+                peer: addr
             };
 
             // Spawn a new task to process the connections. Tokio tasks are like
@@ -128,7 +130,13 @@ impl Handler {
         loop {
             tokio::select! {
                 result = self.connection.read_frame() => match result {
-                    Ok(Some(message)) => message.apply(&self.state).await?,
+                    Ok(Some(message)) => {
+                        message.apply(&mut self.state).await?;
+                        println!("Current peer {:?}", self.peer);
+                        if self.state.is_active_peer(self.peer).await? {
+                            println!("Active peer!");
+                        }
+                    },
                     Ok(None) => return Ok(()),
                     Err(err) => return Err(err)
                 }
