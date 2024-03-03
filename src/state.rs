@@ -4,11 +4,11 @@ use crate::Client;
 use rand::seq::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque, HashMap};
 use std::default::Default;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug)]
 pub struct Config {
@@ -28,9 +28,13 @@ pub(crate) struct PeerState {
     shared: Arc<Shared>,
 }
 
+type Tx = mpsc::UnboundedSender<ProtocolMessage>;
+type Rx = mpsc::UnboundedReceiver<ProtocolMessage>;
+
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
+    active_connections: Mutex<HashMap<SocketAddr, Tx>>,
 }
 
 #[derive(Debug)]
@@ -65,8 +69,16 @@ impl PeerState {
                     passive_view: HashSet::new(),
                     config: config,
                 }),
+                active_connections: Mutex::new(HashMap::new()),
             }),
         }
+    }
+
+    pub(crate) async fn new_active_peer(&mut self, peer: SocketAddr) -> Result<Rx, Box<dyn std::error::Error + Send + Sync>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut active_connections = self.shared.active_connections.lock().await;
+        active_connections.insert(peer, tx);
+        Ok(rx)
     }
 
     pub(crate) async fn is_active_peer(&self, peer: SocketAddr) -> Result<bool, std::io::Error> {

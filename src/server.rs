@@ -81,7 +81,7 @@ impl Listener {
             let mut handler = Handler {
                 state: self.state_holder.state(),
                 connection: Connection::new(stream),
-                peer: addr
+                peer: addr,
             };
 
             // Spawn a new task to process the connections. Tokio tasks are like
@@ -126,21 +126,33 @@ impl Listener {
 }
 
 impl Handler {
-    async fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        loop {
-            tokio::select! {
-                result = self.connection.read_frame() => match result {
-                    Ok(Some(message)) => {
-                        message.apply(&mut self.state).await?;
-                        println!("Current peer {:?}", self.peer);
-                        if self.state.is_active_peer(self.peer).await? {
-                            println!("Active peer!");
-                        }
-                    },
-                    Ok(None) => return Ok(()),
-                    Err(err) => return Err(err)
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let maybe_sender = match self.connection.read_frame().await {
+            Ok(Some(message)) => {
+                let sender = message.sender();
+                message.apply(&mut self.state).await?;
+                Some(sender.clone()) // can we avoid the clone?
+            },
+            Ok(None) => None,
+            Err(err) => return Err(err),
+        };
+
+        if let Some(sender) = maybe_sender {
+            let mut rx = self.state.new_active_peer(sender).await?;
+            loop {
+                tokio::select! {
+                    Some(message) = rx.recv() => {
+                        self.connection.write_frame(&message).await;
+                    }
+                    result = self.connection.read_frame() => match result {
+                        Ok(Some(message)) => message.apply(&mut self.state).await?,
+                        Ok(None) => return Ok(()),
+                        Err(err) => return Err(err),
+                    }
                 }
             }
-        }
+        };
+
+        Ok(())
     }
 }
