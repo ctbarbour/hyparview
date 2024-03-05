@@ -30,4 +30,4 @@ jobs:
         with:
           components: rustfmt
       - name: Rustfmt check
-        users: actions-rust-lang/rustfmt@v1
+        uses: actions-rust-lang/rustfmt@v1
