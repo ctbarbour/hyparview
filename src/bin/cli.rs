@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use hyparview::client::Client;
+use tokio::net::{UnixListener, UnixStream};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -28,7 +29,7 @@ enum Command {
 /// threads. The CLI tool use case benefits more by being lighter instead of
 /// multi-threaded.
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> hyparview::Result<()> {
     let cli = Cli::parse();
 
     let addr = format!("{}:{}", cli.host, cli.port);

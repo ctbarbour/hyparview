@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::{self, Duration};
+use tracing::{debug, error, info, span, warn, Level};
 
 #[derive(Debug)]
 struct Listener {
@@ -39,6 +40,7 @@ impl PeerStateDropGuard {
 
 const MAX_CONNECTIONS: usize = 1024;
 
+#[tracing::instrument]
 pub async fn run(listener: TcpListener) {
     let mut server = Listener {
         listener: listener,
@@ -49,13 +51,14 @@ pub async fn run(listener: TcpListener) {
     tokio::select! {
         res = server.run() => {
             if let Err(e) = res {
-                eprintln!("failed to accept socket; err = {:?}", e);
+                tracing::error!("failed to accept socket; err = {:?}", e);
             }
         }
     }
 }
 
 impl Listener {
+    #[tracing::instrument]
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             // Wait for a permit to become available
@@ -89,7 +92,7 @@ impl Listener {
             tokio::spawn(async move {
                 // Process the connection. If an error is encountered, log it.
                 if let Err(err) = handler.run().await {
-                    eprintln!("connection error; err = {:?}", err);
+                    tracing::error!("connection error; err = {:?}", err);
                 }
                 // Move the permit into the task and drop it after completion.
                 // This returns the permit back to the semaphore.
@@ -132,13 +135,14 @@ impl Handler {
                 let sender = message.sender();
                 message.apply(&mut self.state).await?;
                 Some(sender.clone()) // can we avoid the clone?
-            },
+            }
             Ok(None) => None,
             Err(err) => return Err(err),
         };
 
         if let Some(sender) = maybe_sender {
             let mut rx = self.state.new_active_peer(sender).await?;
+            tracing::info!("Client connection {:?}", sender);
             loop {
                 tokio::select! {
                     Some(message) = rx.recv() => {

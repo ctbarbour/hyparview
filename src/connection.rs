@@ -3,8 +3,18 @@ use bytes::{Buf, BytesMut};
 use serde::Serialize;
 use serde_cbor::ser::Serializer;
 use std::io::Cursor;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
+use tokio::net::{TcpStream, UnixStream};
+
+trait FramedStream {
+    async fn read_frame(&mut self) -> crate::Result<Option<ProtocolMessage>>;
+    async fn write_frame(&mut self, message: &ProtocolMessage) -> crate::Result<()>;
+}
+
+enum StreamType {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
 
 #[derive(Debug)]
 pub struct Connection {
@@ -32,9 +42,7 @@ impl Connection {
         self.stream.flush().await
     }
 
-    pub async fn read_frame(
-        &mut self,
-    ) -> Result<Option<ProtocolMessage>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn read_frame(&mut self) -> crate::Result<Option<ProtocolMessage>> {
         loop {
             let mut buf = Cursor::new(&self.buffer[..]);
 

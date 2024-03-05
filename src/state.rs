@@ -4,7 +4,7 @@ use crate::Client;
 use rand::seq::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use std::collections::{HashSet, VecDeque, HashMap};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::default::Default;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -74,7 +74,7 @@ impl PeerState {
         }
     }
 
-    pub(crate) async fn new_active_peer(&mut self, peer: SocketAddr) -> Result<Rx, Box<dyn std::error::Error + Send + Sync>> {
+    pub(crate) async fn new_active_peer(&mut self, peer: SocketAddr) -> crate::Result<Rx> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut active_connections = self.shared.active_connections.lock().await;
         active_connections.insert(peer, tx);
@@ -86,7 +86,7 @@ impl PeerState {
         Ok(state.is_active_peer(peer))
     }
 
-    pub(crate) async fn on_join(&self, message: Join) -> Result<(), std::io::Error> {
+    pub(crate) async fn on_join(&self, message: Join) -> crate::Result<()> {
         let mut state = self.shared.state.lock().await;
         let mut actions = VecDeque::new();
         state.on_join(message, &mut actions);
@@ -132,7 +132,7 @@ impl PeerState {
         Ok(())
     }
 
-    async fn handle_actions(&self, actions: &mut VecDeque<Action>) -> Result<(), std::io::Error> {
+    async fn handle_actions(&self, actions: &mut VecDeque<Action>) -> crate::Result<()> {
         for action in actions.iter() {
             match action {
                 Action::Send {
