@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
-use tokio::time::{self, Duration};
+use tokio::time::Duration;
 use tracing::{debug, error, info, span, warn, Level};
 
 #[derive(Debug)]
@@ -59,7 +59,17 @@ pub async fn run(listener: TcpListener) {
 
 impl Listener {
     #[tracing::instrument]
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> crate::Result<()> {
+        // Clone the Arc outside the scope of Task.
+        let mut shuffle_state = self.state_holder.state();
+        tokio::spawn(async move {
+            loop {
+                time::sleep(Duration::from_secs(60)).await; // read the shuffle interval from the config
+                info!("Shuffling nodes");
+                shuffle_state.do_shuffle().await;
+            }
+        });
+
         loop {
             // Wait for a permit to become available
             //
@@ -108,7 +118,7 @@ impl Listener {
     /// After the second failure, the task waits for 2 seconds. Each subsequent
     /// failure doubles the wait time. If accepting fails on the 6th try after
     /// waiting for 64 seconds, then this function returns with an error.
-    async fn accept(&mut self) -> Result<(TcpStream, SocketAddr), Box<dyn std::error::Error>> {
+    async fn accept(&mut self) -> crate::Result<(TcpStream, SocketAddr)> {
         let mut backoff = 1;
 
         loop {
@@ -129,7 +139,7 @@ impl Listener {
 }
 
 impl Handler {
-    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn run(&mut self) -> crate::Result<()> {
         let maybe_sender = match self.connection.read_frame().await {
             Ok(Some(message)) => {
                 let sender = message.sender();

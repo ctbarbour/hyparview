@@ -62,6 +62,20 @@ impl ProtocolMessage {
         ProtocolMessage::Join(Join { sender: sender })
     }
 
+    pub(crate) fn shuffle(
+        sender: SocketAddr,
+        origin: SocketAddr,
+        nodes: Vec<SocketAddr>,
+        ttl: u32,
+    ) -> Self {
+        ProtocolMessage::Shuffle(Shuffle {
+            sender: sender,
+            origin: origin,
+            nodes: nodes,
+            ttl: ttl,
+        })
+    }
+
     pub(crate) fn forward_join(sender: SocketAddr, peer: SocketAddr, ttl: u32) -> Self {
         ProtocolMessage::ForwardJoin(ForwardJoin {
             sender: sender,

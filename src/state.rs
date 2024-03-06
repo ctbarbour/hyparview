@@ -47,15 +47,15 @@ pub struct State {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            local_peer: SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+            local_peer: SocketAddr::new("127.0.0.1".parse().unwrap(), 5000),
             active_random_walk_length: 6,
-            passive_random_walk_length: 6,
+            passive_random_walk_length: 2,
             active_view_capacity: 4,
             passive_view_capacity: 24,
-            shuffle_ttl: 4,
-            shuffle_active_view_count: 4,
-            shuffle_passive_view_count: 4,
-            shuffle_interval: 5,
+            shuffle_ttl: 2,
+            shuffle_active_view_count: 2,
+            shuffle_passive_view_count: 2,
+            shuffle_interval: 60,
         }
     }
 }
@@ -72,6 +72,13 @@ impl PeerState {
                 active_connections: Mutex::new(HashMap::new()),
             }),
         }
+    }
+
+    pub(crate) async fn do_shuffle(&mut self) -> crate::Result<()> {
+        let state = self.shared.state.lock().await;
+        let mut actions = VecDeque::new();
+        state.do_shuffle(&mut actions);
+        Ok(())
     }
 
     pub(crate) async fn new_active_peer(&mut self, peer: SocketAddr) -> crate::Result<Rx> {
@@ -151,6 +158,34 @@ impl PeerState {
 }
 
 impl State {
+    pub fn do_shuffle(&self, actions: &mut VecDeque<Action>) {
+        if let Some(peer) = Self::select_random_peer(&self.active_view) {
+            /// Maybe we should provide a method which takes a vec as a parameter and use choose_multiple_fill
+            /// so we avoid having to create the two vecs and then extending.
+            let mut shuffled_active_peers: Vec<_> = Self::select_random_n_peers(
+                &self.active_view,
+                self.config.shuffle_active_view_count,
+            )
+            .into_iter()
+            .filter(|&i| i != peer)
+            .collect();
+            let mut shuffled_passive_peers = Self::select_random_n_peers(
+                &self.passive_view,
+                self.config.shuffle_passive_view_count,
+            );
+            shuffled_passive_peers.extend(&shuffled_active_peers);
+            actions.push_back(Action::send(
+                peer,
+                ProtocolMessage::shuffle(
+                    self.config.local_peer,
+                    self.config.local_peer,
+                    shuffled_passive_peers,
+                    self.config.shuffle_ttl,
+                ),
+            ));
+        }
+    }
+
     pub fn is_active_peer(&self, peer: SocketAddr) -> bool {
         self.active_view.contains(&peer)
     }
