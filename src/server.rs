@@ -18,7 +18,6 @@ struct Listener {
 pub struct Handler {
     state: PeerState,
     connection: Connection,
-    peer: SocketAddr,
 }
 
 #[derive(Debug)]
@@ -89,12 +88,11 @@ impl Listener {
             // Accept a new socket. This will attempt to perform error handling.
             // The `accept` method internally attempts to recover errors, so an
             // error here is non-recoverable.
-            let (stream, addr) = self.accept().await?;
+            let stream = self.accept().await?;
 
             let mut handler = Handler {
                 state: self.state_holder.state(),
                 connection: Connection::new(stream),
-                peer: addr,
             };
 
             // Spawn a new task to process the connections. Tokio tasks are like
@@ -118,12 +116,12 @@ impl Listener {
     /// After the second failure, the task waits for 2 seconds. Each subsequent
     /// failure doubles the wait time. If accepting fails on the 6th try after
     /// waiting for 64 seconds, then this function returns with an error.
-    async fn accept(&mut self) -> crate::Result<(TcpStream, SocketAddr)> {
+    async fn accept(&mut self) -> crate::Result<TcpStream> {
         let mut backoff = 1;
 
         loop {
             match self.listener.accept().await {
-                Ok((socket, peer_addr)) => return Ok((socket, peer_addr)),
+                Ok((socket, _)) => return Ok(socket),
                 Err(e) => {
                     if backoff > 64 {
                         return Err(Box::new(e));
