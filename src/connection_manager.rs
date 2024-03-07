@@ -20,6 +20,25 @@ impl ConnectionManager {
         self.state.clone()
     }
 
+    pub(crate) async fn send(&mut self, peer: SocketAddr, message: &ProtocolMessage) -> crate::Result<()> {
+        let mut guard = self.active_connections.lock().await;
+        if let Some(tx) = guard.get(&peer) {
+            &tx.send(message.clone());
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn broadcast(&mut self, message: &ProtocolMessage) -> crate::Result<()> {
+        let mut guard = self.active_connections.lock().await;
+
+        for (_, tx) in guard.iter() {
+            tx.send(message.clone());
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn handle_connection(&mut self, mut connection: Connection) -> crate::Result<()> {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
