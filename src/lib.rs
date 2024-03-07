@@ -16,6 +16,8 @@ pub use action::Action;
 pub mod client;
 pub use client::Client;
 
+pub mod connection_manager;
+
 /// Copied from https://github.com/tokio-rs/mini-redis/blob/master/src/lib.rs
 ///
 /// Error returned by most functions.

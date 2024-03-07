@@ -146,8 +146,19 @@ impl PeerState {
                     destination,
                     message,
                 } => {
-                    let mut client = Client::connect(destination).await?;
-                    client.send(&message).await?;
+                    // If the destination has an active connection, we send over the open tcp connection
+                    if let Some(tx) = self
+                        .shared
+                        .active_connections
+                        .lock()
+                        .await
+                        .get(&destination)
+                    {
+                        tx.send(message.clone())?; // Can we avoid the clone?
+                    } else {
+                        let mut client = Client::connect(destination).await?;
+                        client.send(&message).await?;
+                    }
                 }
                 Action::Disconnect { .. } => (),
             }
@@ -160,8 +171,8 @@ impl PeerState {
 impl State {
     pub fn do_shuffle(&self, actions: &mut VecDeque<Action>) {
         if let Some(peer) = Self::select_random_peer(&self.active_view) {
-            /// Maybe we should provide a method which takes a vec as a parameter and use choose_multiple_fill
-            /// so we avoid having to create the two vecs and then extending.
+            // Maybe we should provide a method which takes a vec as a parameter and use choose_multiple_fill
+            // so we avoid having to create the two vecs and then extending.
             let mut shuffled_active_peers: Vec<_> = Self::select_random_n_peers(
                 &self.active_view,
                 self.config.shuffle_active_view_count,

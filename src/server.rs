@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
-use tokio::time::Duration;
+use tokio::time::{self, Duration};
 use tracing::{debug, error, info, span, warn, Level};
 
 #[derive(Debug)]
