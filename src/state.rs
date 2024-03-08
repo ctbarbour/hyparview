@@ -74,6 +74,10 @@ impl PeerState {
         }
     }
 
+    pub(crate) async fn local_peer(&self) -> crate::Result<SocketAddr> {
+        Ok(self.shared.state.lock().await.config.local_peer)
+    }
+
     pub(crate) async fn do_shuffle(&mut self) -> crate::Result<()> {
         let state = self.shared.state.lock().await;
         let mut actions = VecDeque::new();

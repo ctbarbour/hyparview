@@ -2,7 +2,7 @@ use crate::ProtocolMessage;
 use crate::Connection;
 use crate::PeerState;
 use std::collections::HashMap;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use std::sync::Arc;
@@ -10,9 +10,21 @@ use std::sync::Arc;
 type Rx = mpsc::UnboundedReceiver<ProtocolMessage>;
 type Tx = mpsc::UnboundedSender<ProtocolMessage>;
 
+#[derive(Debug, Clone)]
+struct ConnectionSignals {
+    tx: Tx,
+    shutdown: Arc<Notify>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActiveConnections {
+    connections: Arc<Mutex<HashMap<SocketAddr, ConnectionSignals>>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ConnectionManager {
     state: PeerState,
-    active_connections: Mutex<HashMap<SocketAddr, Tx>>,
+    active_connections: ActiveConnections,
 }
 
 impl ConnectionManager {
@@ -20,20 +32,24 @@ impl ConnectionManager {
         self.state.clone()
     }
 
+    fn active_connections(&self) -> ActiveConnections {
+        self.active_connections.clone()
+    }
+
     pub(crate) async fn send(&mut self, peer: SocketAddr, message: &ProtocolMessage) -> crate::Result<()> {
-        let mut guard = self.active_connections.lock().await;
-        if let Some(tx) = guard.get(&peer) {
-            &tx.send(message.clone());
+        let active_connections = self.active_connections.connections.lock().await;
+        if let Some(signals) = active_connections.get(&peer) {
+            &signals.tx.send(message.clone());
         }
 
         Ok(())
     }
 
     pub(crate) async fn broadcast(&mut self, message: &ProtocolMessage) -> crate::Result<()> {
-        let mut guard = self.active_connections.lock().await;
+        let active_connections = self.active_connections.connections.lock().await;
 
-        for (_, tx) in guard.iter() {
-            tx.send(message.clone());
+        for (_, signals) in active_connections.iter() {
+            signals.tx.send(message.clone());
         }
 
         Ok(())
@@ -41,28 +57,42 @@ impl ConnectionManager {
 
     pub(crate) async fn handle_connection(&mut self, mut connection: Connection) -> crate::Result<()> {
         let (tx, mut rx) = mpsc::unbounded_channel();
-
-        {
-            let mut guard = self.active_connections.lock().await;
-            guard.insert(connection.peer_addr(), tx);
-        }
+        let connection_signals = ConnectionSignals { tx: tx, shutdown: Arc::new(Notify::new()) };
 
         let mut task_state = self.state();
+        let shutdown = connection_signals.shutdown.clone();
+        {
+            let mut active_connections = self.active_connections.connections.lock().await;
+            active_connections.insert(connection.peer_addr(), connection_signals);
+        }
+
+        let mut active_connections = self.active_connections.clone();
+
         tokio::spawn(async move {
             loop {
                 tokio::select!(
+                    _ = shutdown.notified() => { break; }
+
                     Some(message) = rx.recv() => {
-                        connection.write_frame(&message).await?;
+                        connection.write_frame(&message).await;
                     }
 
                     res = connection.read_frame() => match res {
                         Ok(Some(message)) => message.apply(&mut task_state).await?,
-                        Ok(None) => return Ok(()),
+                        Ok(None) => break,
                         Err(err) => return Err(err),
                     }
                 )
             }
+
+            {
+                let mut active_connections = active_connections.connections.lock().await;
+                active_connections.remove(&task_state.local_peer().await.unwrap());
+            }
+
+            Ok(())
         });
         Ok(())
     }
 }
+
