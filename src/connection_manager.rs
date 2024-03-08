@@ -17,7 +17,7 @@ struct ConnectionSignals {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActiveConnections {
+struct ActiveConnections {
     connections: Arc<Mutex<HashMap<SocketAddr, ConnectionSignals>>>,
 }
 
@@ -30,10 +30,6 @@ pub struct ConnectionManager {
 impl ConnectionManager {
     fn state(&self) -> PeerState {
         self.state.clone()
-    }
-
-    fn active_connections(&self) -> ActiveConnections {
-        self.active_connections.clone()
     }
 
     pub(crate) async fn send(&mut self, peer: SocketAddr, message: &ProtocolMessage) -> crate::Result<()> {
@@ -88,6 +84,10 @@ impl ConnectionManager {
             {
                 let mut active_connections = active_connections.connections.lock().await;
                 active_connections.remove(&task_state.local_peer().await.unwrap());
+                let disconnect_message = ProtocolMessage::disconnect(task_state.local_peer().await.unwrap(), false, false);
+                for (_, signals) in active_connections.iter() {
+                    signals.tx.send(disconnect_message.clone());
+                }
             }
 
             Ok(())
