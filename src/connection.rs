@@ -21,20 +21,14 @@ enum StreamType {
 pub struct Connection {
     stream: BufWriter<TcpStream>,
     buffer: BytesMut,
-    peer_addr: SocketAddr,
 }
 
 impl Connection {
     pub fn new(stream: TcpStream) -> Connection {
         Connection {
-            peer_addr: stream.peer_addr().unwrap(),
             stream: BufWriter::new(stream),
             buffer: BytesMut::with_capacity(4 * 1024),
         }
-    }
-
-    pub fn peer_addr(&self) -> SocketAddr {
-        self.peer_addr
     }
 
     pub async fn write_frame(&mut self, message: &ProtocolMessage) -> std::io::Result<()> {

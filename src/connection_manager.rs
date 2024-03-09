@@ -1,11 +1,11 @@
-use crate::ProtocolMessage;
 use crate::Connection;
 use crate::PeerState;
+use crate::ProtocolMessage;
 use std::collections::HashMap;
-use tokio::sync::{mpsc, Mutex, Notify};
 use std::net::SocketAddr;
-use tokio::net::TcpStream;
 use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::{mpsc, Mutex, Notify};
 
 type Rx = mpsc::UnboundedReceiver<ProtocolMessage>;
 type Tx = mpsc::UnboundedSender<ProtocolMessage>;
@@ -32,7 +32,11 @@ impl ConnectionManager {
         self.state.clone()
     }
 
-    pub(crate) async fn send(&mut self, peer: SocketAddr, message: &ProtocolMessage) -> crate::Result<()> {
+    pub(crate) async fn send(
+        &mut self,
+        peer: SocketAddr,
+        message: &ProtocolMessage,
+    ) -> crate::Result<()> {
         let active_connections = self.active_connections.connections.lock().await;
         if let Some(signals) = active_connections.get(&peer) {
             &signals.tx.send(message.clone());
@@ -51,15 +55,22 @@ impl ConnectionManager {
         Ok(())
     }
 
-    pub(crate) async fn handle_connection(&mut self, mut connection: Connection) -> crate::Result<()> {
+    pub(crate) async fn handle_connection(
+        &mut self,
+        peer_addr: SocketAddr,
+        mut connection: Connection,
+    ) -> crate::Result<()> {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let connection_signals = ConnectionSignals { tx: tx, shutdown: Arc::new(Notify::new()) };
+        let connection_signals = ConnectionSignals {
+            tx: tx,
+            shutdown: Arc::new(Notify::new()),
+        };
 
         let mut task_state = self.state();
         let shutdown = connection_signals.shutdown.clone();
         {
             let mut active_connections = self.active_connections.connections.lock().await;
-            active_connections.insert(connection.peer_addr(), connection_signals);
+            active_connections.insert(peer_addr, connection_signals);
         }
 
         let mut active_connections = self.active_connections.clone();
@@ -83,8 +94,12 @@ impl ConnectionManager {
 
             {
                 let mut active_connections = active_connections.connections.lock().await;
-                active_connections.remove(&task_state.local_peer().await.unwrap());
-                let disconnect_message = ProtocolMessage::disconnect(task_state.local_peer().await.unwrap(), false, false);
+                active_connections.remove(&peer_addr);
+                let disconnect_message = ProtocolMessage::disconnect(
+                    task_state.local_peer().await.unwrap(),
+                    false,
+                    false,
+                );
                 for (_, signals) in active_connections.iter() {
                     signals.tx.send(disconnect_message.clone());
                 }
@@ -95,4 +110,3 @@ impl ConnectionManager {
         Ok(())
     }
 }
-
