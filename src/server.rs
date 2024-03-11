@@ -1,4 +1,5 @@
-use crate::{Config, Connection, PeerState};
+use crate::{Config, Connection, PeerState, PeerStateDropGuard};
+use crate::peer_service::PeerService;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -20,31 +21,14 @@ pub struct Handler {
     connection: Connection,
 }
 
-#[derive(Debug)]
-pub(crate) struct PeerStateDropGuard {
-    state: PeerState,
-}
-
-impl PeerStateDropGuard {
-    pub(crate) fn new() -> PeerStateDropGuard {
-        PeerStateDropGuard {
-            state: PeerState::new(Config::default()),
-        }
-    }
-
-    pub(crate) fn state(&self) -> PeerState {
-        self.state.clone()
-    }
-}
-
 const MAX_CONNECTIONS: usize = 1024;
 
 #[tracing::instrument]
-pub async fn run(listener: TcpListener) {
+pub async fn run(listener: TcpListener, config: Config) {
     let mut server = Listener {
         listener: listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
-        state_holder: PeerStateDropGuard::new(),
+        state_holder: PeerStateDropGuard::new(config),
     };
 
     tokio::select! {
@@ -149,21 +133,10 @@ impl Handler {
         };
 
         if let Some(sender) = maybe_sender {
-            let mut rx = self.state.new_active_peer(sender).await?;
-            tracing::info!("Client connection {:?}", sender);
-            loop {
-                tokio::select! {
-                    Some(message) = rx.recv() => {
-                        self.connection.write_frame(&message).await;
-                    }
-                    result = self.connection.read_frame() => match result {
-                        Ok(Some(message)) => message.apply(&mut self.state).await?,
-                        Ok(None) => return Ok(()),
-                        Err(err) => return Err(err),
-                    }
-                }
-            }
-        };
+            let mut peer_service = PeerService::new(sender, );
+            peer_service.handle_connection(self.state.clone());
+            self.state.add_active_connection(sender, peer_service);
+        }
 
         Ok(())
     }

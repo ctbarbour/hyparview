@@ -3,6 +3,7 @@ pub mod server;
 pub mod state;
 use state::Config;
 use state::PeerState;
+use state::PeerStateDropGuard;
 
 pub mod connection;
 pub use connection::Connection;
@@ -16,7 +17,7 @@ pub use action::Action;
 pub mod client;
 pub use client::Client;
 
-pub mod connection_manager;
+pub mod peer_service;
 
 /// Copied from https://github.com/tokio-rs/mini-redis/blob/master/src/lib.rs
 ///

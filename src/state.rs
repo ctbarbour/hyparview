@@ -1,6 +1,7 @@
 use crate::message::*;
 use crate::Action;
 use crate::Client;
+use crate::peer_service::PeerService;
 use rand::seq::IteratorRandom;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -9,6 +10,9 @@ use std::default::Default;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+
+type Tx = mpsc::UnboundedSender<ProtocolMessage>;
+type Rx = mpsc::UnboundedReceiver<ProtocolMessage>;
 
 #[derive(Debug)]
 pub struct Config {
@@ -21,27 +25,6 @@ pub struct Config {
     shuffle_active_view_count: usize,
     shuffle_passive_view_count: usize,
     shuffle_interval: u32,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PeerState {
-    shared: Arc<Shared>,
-}
-
-type Tx = mpsc::UnboundedSender<ProtocolMessage>;
-type Rx = mpsc::UnboundedReceiver<ProtocolMessage>;
-
-#[derive(Debug)]
-struct Shared {
-    state: Mutex<State>,
-    active_connections: Mutex<HashMap<SocketAddr, Tx>>,
-}
-
-#[derive(Debug)]
-pub struct State {
-    active_view: HashSet<SocketAddr>,
-    passive_view: HashSet<SocketAddr>,
-    config: Config,
 }
 
 impl Default for Config {
@@ -58,6 +41,41 @@ impl Default for Config {
             shuffle_interval: 60,
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct PeerStateDropGuard {
+    state: PeerState,
+}
+
+impl PeerStateDropGuard {
+    pub(crate) fn new(config: Config) -> PeerStateDropGuard {
+        PeerStateDropGuard {
+            state: PeerState::new(config),
+        }
+    }
+
+    pub(crate) fn state(&self) -> PeerState {
+        self.state.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PeerState {
+    shared: Arc<Shared>,
+}
+
+#[derive(Debug)]
+struct Shared {
+    state: Mutex<State>,
+    active_connections: Mutex<HashMap<SocketAddr, PeerService>>,
+}
+
+#[derive(Debug)]
+pub struct State {
+    active_view: HashSet<SocketAddr>,
+    passive_view: HashSet<SocketAddr>,
+    config: Config,
 }
 
 impl PeerState {
@@ -78,18 +96,44 @@ impl PeerState {
         Ok(self.shared.state.lock().await.config.local_peer)
     }
 
+    pub(crate) async fn send(&self, destination: SocketAddr, message: ProtocolMessage) -> crate::Result<()> {
+        let active_connections = self.shared.active_connections.lock().await;
+        if let Some(peer) = active_connections.get(&destination) {
+            &peer.send(message.clone()); // do we have to clone on each send?
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn broadcast(&self, message: ProtocolMessage) -> crate::Result<()> {
+        let active_connections = self.shared.active_connections.lock().await;
+
+        for (_, peer_service) in active_connections.iter() {
+            peer_service.send(message.clone());
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn add_active_connection(&self, peer: SocketAddr, peer_service: PeerService) -> crate::Result<()> {
+        let mut active_connections = self.shared.active_connections.lock().await;
+        active_connections.insert(peer, peer_service);
+
+        Ok(())
+    }
+
+    pub(crate) async fn drop_active_connection(&self, peer: SocketAddr) -> crate::Result<()> {
+        let mut active_connections = self.shared.active_connections.lock().await;
+        active_connections.remove(&peer);
+
+        Ok(())
+    }
+
     pub(crate) async fn do_shuffle(&mut self) -> crate::Result<()> {
         let state = self.shared.state.lock().await;
         let mut actions = VecDeque::new();
         state.do_shuffle(&mut actions);
         Ok(())
-    }
-
-    pub(crate) async fn new_active_peer(&mut self, peer: SocketAddr) -> crate::Result<Rx> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut active_connections = self.shared.active_connections.lock().await;
-        active_connections.insert(peer, tx);
-        Ok(rx)
     }
 
     pub(crate) async fn is_active_peer(&self, peer: SocketAddr) -> Result<bool, std::io::Error> {

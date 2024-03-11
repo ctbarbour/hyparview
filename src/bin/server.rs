@@ -1,4 +1,5 @@
 use hyparview::server;
+use hyparview::state::Config;
 use std::env;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -22,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(addr).await?;
 
     tracing::info!("server running on {}", addr);
-    server::run(listener).await;
+    server::run(listener, Config::default()).await;
 
     Ok(())
 }
